@@ -15,7 +15,8 @@ class Autoencoder:
             self: Self,
             topology: List[int],
             eta: float,
-            activation:Activation,
+            encoder_activation:Activation,
+            decoder_activation:Activation,
             train_inputs: ZScoreStandardize,
             epochs: int = 1000,
             batch_size: int = 1,
@@ -23,8 +24,8 @@ class Autoencoder:
             optimization: Optimization = NoOptimization()):
         decoder_topo = topology.copy()
         decoder_topo.reverse()
-        self.encoder = Perceptron(topology, activation, eta, optimization=optimization)
-        self.decoder = Perceptron(decoder_topo, activation, eta, optimization=optimization)
+        self.encoder = Perceptron(topology, encoder_activation, eta, optimization=optimization)
+        self.decoder = Perceptron(decoder_topo, decoder_activation, eta, optimization=optimization)
         self.epochs = epochs
         self.epoch = 0
         self.inputs = train_inputs
@@ -88,7 +89,7 @@ class Autoencoder:
 
 if __name__ == '__main__':
     inputs = dumb_parse_c_array(pathlib.Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
-    encoder = Autoencoder([35, 30, 25, 20, 15, 10, 5, 2], 0.0005, ReLU(), ZScoreStandardize(inputs), epochs=50000, batch_size=32, optimization=Adam())
+    encoder = Autoencoder([35, 30, 25, 20, 15, 10, 5, 2], 0.0005, ReLU(), Tanh(), ZScoreStandardize(inputs), epochs=5000, batch_size=1, optimization=Adam())
     print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{encoder.get_output_from_latent_code(encoder.get_latent_code(inputs[1])).reshape((7,5))}")
 
     # print("\n\n")

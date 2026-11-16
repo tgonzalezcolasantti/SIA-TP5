@@ -92,6 +92,7 @@ class Perceptron:
         if self.outputs.shape != shape:
             self.outputs = np.zeros(shape)
             self.h = np.zeros(shape)
+
         self.outputs[self.layer_slices[0]] = inputs.T
         for layer_idx in range(1, len(self.layer_slices)):
             previous = self.layer_slices[layer_idx - 1]

@@ -54,7 +54,10 @@ class ReLU(Activation):
 
     @override
     def derivative(self: Self, value: np.ndarray) -> np.ndarray:
-        return np.ones(value.shape)
+        mask = value > 0
+        ans = np.zeros(value.shape)
+        ans[mask] = 1
+        return ans
 
 class BetaActivation(Activation):
     def __init__(self: Self, beta: float = 1):
