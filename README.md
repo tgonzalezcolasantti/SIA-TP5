@@ -106,3 +106,10 @@ Esta implementación conecta el Kohonen existente con los datos y los experiment
 Los estadísticos y gráficos son insumos para el EDA; falta su interpretación y la
 justificación de variables. PCA, Oja, Hopfield y las conclusiones para campañas siguen
 pendientes. El MSE supervisado y los k-folds del TP3 no se trasladaron a este estudio.
+
+## Dataset de emojis para el VAE del TP5
+
+`data/emojis/` contiene 16 caritas de 16 × 16 píxeles en blanco y negro con
+fondo transparente. La selección conserva los nombres originales de la carpeta
+`Emoji 1-bits` del pack [128+ Emoji Pixel Art de KabGames](https://kaboff.itch.io/128-emoji-pixel-art),
+publicado bajo CC0 1.0.
