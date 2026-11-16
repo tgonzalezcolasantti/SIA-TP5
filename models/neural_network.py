@@ -66,7 +66,6 @@ class Perceptron:
         for layer_idx in range(1, len(neuron_topology)):
             previous = self.layer_slices[layer_idx - 1]
             current = self.layer_slices[layer_idx]
-            # TODO What is this? aka why this function specifically?
             limit = np.sqrt(
                 6 / (neuron_topology[layer_idx - 1] + neuron_topology[layer_idx])
             )
@@ -113,7 +112,7 @@ class Perceptron:
         print(f"MSE: {mse}\tMAE: {mae}")
         return mse, mae
 
-    def _update_weights(self: Self, output_errors: np.ndarray):
+    def update_weights(self: Self, output_errors: np.ndarray):
         batch_count = output_errors.shape[1]
         output_layer = self.layer_slices[-1]
         output_derivatives = self.activation.derivative(self.h[output_layer])
@@ -124,7 +123,7 @@ class Perceptron:
         self.deltas[output_layer] = output_errors * output_derivatives
 
         #backpropagation for derivatives
-        for layer_idx in range(len(self.layer_slices) - 2, 0, -1):
+        for layer_idx in range(len(self.layer_slices) - 2, -1, -1):
             current = self.layer_slices[layer_idx]
             following = self.layer_slices[layer_idx + 1]
             derivatives = self.activation.derivative(self.h[current])
@@ -141,6 +140,7 @@ class Perceptron:
         self.weights += self.optimization.apply(
             self.learning_rate, self.gradient
         )
+        return self.weights[self.layer_slices[1], self.layer_slices[0]].T @ self.deltas[self.layer_slices[1]]
 
     def train(
         self: Self,
@@ -169,7 +169,7 @@ class Perceptron:
             for start in range(0, len(inputs), effective_batch_size):
                 indices = order[start:start + effective_batch_size]
                 outputs = self._calculate_outputs(inputs[indices])
-                self._update_weights(outputs - expected[indices].T)
+                self.update_weights(outputs - expected[indices].T)
             self.epoch += 1
             if with_history or epsilon >= 0:
                 predictions = self.classify(inputs)
