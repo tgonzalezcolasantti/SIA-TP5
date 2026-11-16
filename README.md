@@ -113,3 +113,19 @@ pendientes. El MSE supervisado y los k-folds del TP3 no se trasladaron a este es
 fondo transparente. La selección conserva los nombres originales de la carpeta
 `Emoji 1-bits` del pack [128+ Emoji Pixel Art de KabGames](https://kaboff.itch.io/128-emoji-pixel-art),
 publicado bajo CC0 1.0.
+
+## Entrenamiento del VAE (punto 2.b)
+
+Desde la raíz del repo:
+
+```powershell
+uv run --locked python -m models.variational_autoencoder --epochs 1000 --seed 42
+```
+
+El cargador convierte cada PNG en un vector de 256 valores, con `1` para negro
+y `0` para blanco o transparente. El codificador `256 → 64 → 4` predice dos
+medias y dos logvarianzas. Durante el entrenamiento, el decodificador
+`2 → 64 → 256` recibe un vector latente muestreado mediante reparametrización.
+La pérdida suma la entropía cruzada binaria de reconstrucción y la divergencia KL
+respecto de una normal estándar. El comando registra ambos términos y mide los
+píxeles incorrectos al reconstruir los emojis de entrenamiento desde sus medias latentes.

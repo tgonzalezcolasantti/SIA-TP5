@@ -11,6 +11,8 @@ from .activation import Activation
 
 
 class Perceptron:
+    output_activation: Activation | None = None
+
     def __init__(
         self: Self,
         neuron_topology: List[int],
@@ -21,11 +23,16 @@ class Perceptron:
         weights: np.ndarray | None = None,
         optimization: Optimization = NoOptimization(),
         model_name: Optional[str] = None,
+        *,
+        output_activation: Activation | None = None,
+        rng: np.random.Generator | None = None,
     ):
         self.model_name = model_name
         self.topology = neuron_topology
         self.learning_rate = learning_rate
         self.activation = activation
+        self.output_activation = output_activation
+        self._rng = rng
         self.optimization = optimization
         self.epoch = epoch
         self.error_history = []
@@ -38,6 +45,7 @@ class Perceptron:
                 weights = unpickled.weights
                 neuron_topology = unpickled.topology
                 self.activation = unpickled.activation
+                self.output_activation = unpickled.output_activation
                 self.optimization = unpickled.optimization
                 self.epoch = unpickled.epoch
                 self.learning_rate = unpickled.learning_rate
@@ -64,13 +72,14 @@ class Perceptron:
             self._init_weights(neuron_topology)
 
     def _init_weights(self: Self, neuron_topology: List[int]):
+        uniform = np.random.uniform if self._rng is None else self._rng.uniform
         for layer_idx in range(1, len(neuron_topology)):
             previous = self.layer_slices[layer_idx - 1]
             current = self.layer_slices[layer_idx]
             limit = np.sqrt(
                 6 / (neuron_topology[layer_idx - 1] + neuron_topology[layer_idx])
             )
-            self.weights[current, previous] = np.random.uniform(
+            self.weights[current, previous] = uniform(
                 -limit,
                 limit,
                 (neuron_topology[layer_idx], neuron_topology[layer_idx - 1]),
@@ -99,7 +108,10 @@ class Perceptron:
             current = self.layer_slices[layer_idx]
             bias = np.diagonal(self.weights[current, current])[:, None]
             self.h[current] = self.weights[current, previous] @ self.outputs[previous] + bias
-            self.outputs[current] = self.activation.excite(self.h[current])
+            activation = self.activation
+            if layer_idx == len(self.layer_slices) - 1:
+                activation = self.output_activation or activation
+            self.outputs[current] = activation.excite(self.h[current])
         return self.outputs[self.layer_slices[-1]]
 
     def _error(self: Self, output_errors: np.ndarray) -> float:
@@ -117,7 +129,8 @@ class Perceptron:
     def update_weights(self: Self, output_errors: np.ndarray):
         batch_count = output_errors.shape[1]
         output_layer = self.layer_slices[-1]
-        output_derivatives = self.activation.derivative(self.h[output_layer])
+        activation = self.output_activation or self.activation
+        output_derivatives = activation.derivative(self.h[output_layer])
         if self.deltas.shape != (self.weights.shape[0], output_errors.shape[1]):
             self.deltas = np.zeros((self.weights.shape[0], output_errors.shape[1]))
         else:
