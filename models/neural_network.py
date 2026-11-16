@@ -1,5 +1,6 @@
 from pathlib import Path
 import pickle
+import sys
 from typing import List, Optional, Self, Tuple, override
 
 import numpy as np
@@ -81,7 +82,7 @@ class Perceptron:
             inputs = inputs[None, :]
         if inputs.ndim != 2 or inputs.shape[1] != self.topology[0]:
             raise ValueError("input size does not match the first layer")
-        return self._calculate_outputs(inputs).T.copy()
+        return self._calculate_outputs(inputs).T
 
     def _calculate_outputs(self: Self, inputs: np.ndarray) -> np.ndarray:
         inputs = np.asarray(inputs, dtype=float)
@@ -123,14 +124,16 @@ class Perceptron:
         self.deltas[output_layer] = output_errors * output_derivatives
 
         #backpropagation for derivatives
-        for layer_idx in range(len(self.layer_slices) - 2, -1, -1):
+        for layer_idx in range(len(self.layer_slices) - 2, 0, -1):
             current = self.layer_slices[layer_idx]
             following = self.layer_slices[layer_idx + 1]
             derivatives = self.activation.derivative(self.h[current])
             self.deltas[current] = (
                 self.weights[following, current].T @ self.deltas[following]
             ) * derivatives
-
+        delta_propagation = self.weights[self.layer_slices[1], self.layer_slices[0]].T @ self.deltas[self.layer_slices[1]]
+        # with np.printoptions(precision=2, threshold=sys.maxsize):
+        #     print(self.deltas)
         for layer_idx in range(1, len(self.layer_slices)):
             previous = self.layer_slices[layer_idx - 1]
             current = self.layer_slices[layer_idx]
@@ -140,47 +143,7 @@ class Perceptron:
         self.weights += self.optimization.apply(
             self.learning_rate, self.gradient
         )
-        return self.weights[self.layer_slices[1], self.layer_slices[0]].T @ self.deltas[self.layer_slices[1]]
-
-    def train(
-        self: Self,
-        training_data: List[Tuple[np.ndarray, np.ndarray]],
-        epochs: int,
-        epsilon: float,
-        batch_size: int = 1,
-        with_history: bool = False,
-        seed: int | None = None,
-    ) -> List[Tuple[float, float]]:
-        if epochs < 0 or batch_size == 0 or batch_size < -1:
-            raise ValueError("epochs must be nonnegative and batch size positive or -1")
-        if not training_data:
-            raise ValueError("training_data must not be empty")
-        inputs = np.asarray([sample[0] for sample in training_data], dtype=float)
-        expected = np.asarray([sample[1] for sample in training_data], dtype=float)
-        if expected.ndim == 1:
-            expected = expected[:, None]
-        if expected.shape != (len(inputs), self.last_layer_count):
-            raise ValueError("expected output shape does not match the last layer")
-        effective_batch_size = len(inputs) if batch_size == -1 else batch_size
-        rng = np.random.default_rng(seed)
-        for i in range(self.epoch, epochs):
-            print(f"Epoch {i}", flush=True)
-            order = rng.permutation(len(inputs)) if seed is not None else np.arange(len(inputs))
-            for start in range(0, len(inputs), effective_batch_size):
-                indices = order[start:start + effective_batch_size]
-                outputs = self._calculate_outputs(inputs[indices])
-                self.update_weights(outputs - expected[indices].T)
-            self.epoch += 1
-            if with_history or epsilon >= 0:
-                predictions = self.classify(inputs)
-                metrics = self._global_errors(predictions, expected)
-                if with_history:
-                    self.error_history.append(metrics)
-                if epsilon >= 0 and metrics[0] / 2 <= epsilon:
-                    self.save()
-                    return self.error_history
-            self.save()
-        return self.error_history
+        return delta_propagation
 
     @classmethod
     def load(cls:type[Perceptron], save_path: Path):
