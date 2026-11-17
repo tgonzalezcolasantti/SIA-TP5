@@ -1,8 +1,11 @@
 import argparse
 from pathlib import Path
-from typing import List, Self, override
+from typing import List, Optional, Self, override
 
 import numpy as np
+from rich.live import Live
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.table import Table
 
 from models.activation import Activation, Tanh
 from models.autoencoder import Autoencoder
@@ -25,7 +28,9 @@ class VariationalAutoencoder(Autoencoder):
         train_inputs: np.ndarray,
         epochs: int = 1000,
         batch_size: int = 1,
-        optimization: type[Optimization] = Adam
+        optimization: type[Optimization] = Adam,
+        task: Optional[TaskID] = None,
+        progress: Optional[Progress] = None
     ):
         decoder_topology = topology.copy()
         decoder_topology.reverse()
@@ -40,7 +45,9 @@ class VariationalAutoencoder(Autoencoder):
             train_inputs=train_inputs,
             epochs=epochs,
             batch_size=batch_size,
-            optimization=optimization
+            optimization=optimization,
+            progress=progress,
+            task=task
         )
         self.last_inputs: np.ndarray
         self.latent_offset: np.ndarray
@@ -144,34 +151,56 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     inputs = load_emojis()
-    model = VariationalAutoencoder(
-        topology=[inputs.shape[1], 64, 2],
-        eta=0.005,
-        encoder_activation=Tanh(),
-        decoder_activation=Tanh(),
-        rng=rng,
-        train_inputs=inputs,
-        epochs=args.epochs,
-        batch_size=len(inputs),
-        optimization=Adam
+    
+    taskprogress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        transient=True,
     )
+    table = Table(box=None)
+    table.add_row(taskprogress)
+    with Live(table, refresh_per_second=10):
+        task = taskprogress.add_task(
+            "Running variational autoencoder training",
+            start=False,
+            total=args.epochs,
+            visible=False,
+            is_task=True,
+        )
+        model = VariationalAutoencoder(
+            topology=[inputs.shape[1], 64, 2],
+            eta=0.005,
+            encoder_activation=Tanh(),
+            decoder_activation=Tanh(),
+            rng=rng,
+            train_inputs=inputs,
+            epochs=args.epochs,
+            batch_size=len(inputs),
+            optimization=Adam,
+            task=task,
+            progress=taskprogress
+        )
 
-    reconstructed = model.reconstruct(inputs) >= 0.5
-    wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
-    print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
+        reconstructed = model.reconstruct(inputs) >= 0.5
+        wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
+        print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
 
-    if args.generate:
-        latent = model.rng.standard_normal((16, 2))
-        generated = model.decode(latent) >= 0.5
-        _, first_indices = np.unique(generated, axis=0, return_index=True)
-        generated = generated[np.sort(first_indices)]
-        differences = np.count_nonzero(generated[:, None, :] != inputs[None, :, :], axis=2)
-        distances = differences.min(axis=1)
-        novel = distances > 0
-        if not np.any(novel):
-            raise SystemExit("No novel emojis were generated. Try another seed.")
-        save_emoji_grid(args.generate, inputs, generated[novel], distances[novel])
-        print(f"Saved {np.count_nonzero(novel)} distinct new emojis to {args.generate}")
+        if args.generate:
+            latent = model.rng.standard_normal((16, 2))
+            generated = model.decode(latent) >= 0.5
+            _, first_indices = np.unique(generated, axis=0, return_index=True)
+            generated = generated[np.sort(first_indices)]
+            differences = np.count_nonzero(generated[:, None, :] != inputs[None, :, :], axis=2)
+            distances = differences.min(axis=1)
+            novel = distances > 0
+            if not np.any(novel):
+                raise SystemExit("No novel emojis were generated. Try another seed.")
+            save_emoji_grid(args.generate, inputs, generated[novel], distances[novel])
+            print(f"Saved {np.count_nonzero(novel)} distinct new emojis to {args.generate}")
 
 
 if __name__ == "__main__":

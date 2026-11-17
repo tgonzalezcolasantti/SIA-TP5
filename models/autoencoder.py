@@ -1,7 +1,10 @@
 import pathlib
 import time
-from typing import List, Self, override
+from typing import List, Optional, Self
 import numpy as np
+from rich.live import Live
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.table import Table
 
 from data.parser import dumb_parse_c_array
 from models.activation import Activation, Adaline, Tanh
@@ -26,6 +29,8 @@ class Autoencoder:
             batch_size: int = 1,
             optimization: type[Optimization] = Adam,
             decoder_topology: List[int] | None = None,
+            task: Optional[TaskID] = None,
+            progress: Optional[Progress] = None
     ):
         if not decoder_topology:
             decoder_topology = topology.copy()
@@ -37,7 +42,14 @@ class Autoencoder:
         self.epoch = 0
         self.inputs = train_inputs
         self.batch_size = batch_size
+        self.progress=progress
+        self.task = task
+        if self.progress is not None and self.task is not None:
+            self.progress.start_task(self.task)
+            self.progress.update(self.task, visible=True)
         self.train()
+        if self.progress is not None and self.task is not None:
+            self.progress.remove_task(self.task)
 
     def encode(self: Self, input_value: np.ndarray)-> np.ndarray:
         return self.encoder.classify(input_value).copy()
@@ -73,7 +85,10 @@ class Autoencoder:
         return input_data
 
     def _print_stats(self: Self, epoch: int):
-        print(f"Epoch {epoch}", flush=True)
+        if self.progress is not None and self.task is not None:
+            self.progress.update(self.task, completed=epoch)
+        else:
+            print(f"Epoch {epoch}", flush=True)
 
     def train(
         self: Self,
@@ -96,85 +111,79 @@ class Autoencoder:
 if __name__ == '__main__':
     inputs, labels = dumb_parse_c_array(pathlib.Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
     rng = np.random.default_rng(42)
-    model = Autoencoder(
-        topology=[35, 16, 2],
-        eta=0.0025,
-        train_inputs=inputs,
-        encoder_activation=Tanh(),
-        decoder_activation=Tanh(),
-        rng=rng,
-        epochs=50000,
-        batch_size=32,
-        optimization=Adam
+    taskprogress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        transient=True,
     )
-    reconstructed = model.reconstruct(inputs) >= 0.5
-    print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{reconstructed[1].reshape((7,5))}")
-    print("\n\n")
+    table = Table(box=None)
+    table.add_row(taskprogress)
+    with Live(table, refresh_per_second=10):
+        task = taskprogress.add_task(
+            "Running autoencoder training",
+            start=False,
+            total=50000,
+            visible=False,
+            is_task=True,
+        )
+        model = Autoencoder(
+            topology=[35, 16, 2],
+            eta=0.0025,
+            train_inputs=inputs,
+            encoder_activation=Tanh(),
+            decoder_activation=Tanh(),
+            rng=rng,
+            epochs=50000,
+            batch_size=32,
+            optimization=Adam,
+            task=task,
+            progress=taskprogress
+        )
+        reconstructed = model.reconstruct(inputs) >= 0.5
+        print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{reconstructed[1].reshape((7,5))}")
+        print("\n\n")
 
-    # Scatterplot de codigo latente
-    encoded = model.encode(inputs)
-    print(encoded)
-    figure, ax = plt.subplots()
-    ax.scatter(encoded[:,0], encoded[:,1])
-    for i, value in enumerate(encoded):
-        ax.annotate(labels[i], (value[0], value[1]), fontsize=12)
-    ax.set_xlabel("1er componente codigo latente")
-    ax.set_ylabel("2da componente codigo latente")
-    ax.set_title("Distribucion de caracteres segun componentes de codigo latente")
-    plt.show()
+        # Scatterplot de codigo latente
+        encoded = model.encode(inputs)
+        print(encoded)
+        figure, ax = plt.subplots()
+        ax.scatter(encoded[:,0], encoded[:,1])
+        for i, value in enumerate(encoded):
+            ax.annotate(labels[i], (value[0], value[1]), fontsize=12)
+        ax.set_xlabel("1er componente codigo latente")
+        ax.set_ylabel("2da componente codigo latente")
+        ax.set_title("Distribucion de caracteres segun componentes de codigo latente")
+        plt.show()
 
-    # Generacion de nuevas letras (?)
+        # Generacion de nuevas letras (?)
 
-    latent_codes = []
-    countx = []
-    county = []
-    for x in range(-25, 26, 1):
-        countx.append(x)
+        latent_codes = []
+        countx = []
         county = []
-        for y in range(-10, 30, 1):
-            county.append(y)
-            latent_codes.append([x, y])
-    latent_codes = np.array(latent_codes)
-    print(latent_codes)
-    print(countx)
-    print(county)
-    generated = (model.decode(latent_codes) >= 0.5).astype(float)
-    result = np.zeros((8*len(county), 6*len(countx)))
+        for x in range(-25, 26, 1):
+            countx.append(x)
+            county = []
+            for y in range(-10, 30, 1):
+                county.append(y)
+                latent_codes.append([x, y])
+        latent_codes = np.array(latent_codes)
+        print(latent_codes)
+        print(countx)
+        print(county)
+        generated = (model.decode(latent_codes) >= 0.5).astype(float)
+        result = np.zeros((8*len(county), 6*len(countx)))
 
-    for image, latent_code in zip(generated, latent_codes):
-        index_x = countx.index(latent_code[0])
-        index_y = county.index(latent_code[1])
-        result[index_y*8:(index_y + 1) * 8 - 1, index_x*6:(index_x+1)*6 - 1] = image.reshape(7,5)
+        for image, latent_code in zip(generated, latent_codes):
+            index_x = countx.index(latent_code[0])
+            index_y = county.index(latent_code[1])
+            result[index_y*8:(index_y + 1) * 8 - 1, index_x*6:(index_x+1)*6 - 1] = image.reshape(7,5)
 
-    plt.figure(figsize=(10, 10))
+        plt.figure(figsize=(10, 10))
 
-    plt.imshow(result, cmap='Greys_r')
-    plt.title("Mapa del codigo latente del autoencoder")
-    plt.show()
-
-    # inputs = load_emojis()
-    # model = VariationalAutoencoder(
-    #     train_inputs=inputs,
-    #     eta=0.0025,
-    #     encoder_activation=Tanh(),
-    #     decoder_activation=Tanh(),
-    #     topology=[16*16, 64, 2],
-    #     batch_size=len(inputs),
-    #     rng=rng,
-    #     epochs=2000,
-    #     optimization=Adam
-    # )
-    # reconstructed = model.reconstruct(inputs) >= 0.5
-    # wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
-    # print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
-    # latent = model.rng.standard_normal((16, 2))
-    # generated = model.decode(latent) >= 0.5
-    # _, first_indices = np.unique(generated, axis=0, return_index=True)
-    # generated = generated[np.sort(first_indices)]
-    # differences = np.count_nonzero(generated[:, None, :] != inputs[None, :, :], axis=2)
-    # distances = differences.min(axis=1)
-    # novel = distances > 0
-    # if not np.any(novel):
-    #     raise SystemExit("No novel emojis were generated. Try another seed.")
-    # save_emoji_grid(pathlib.Path(__file__).parent.resolve() / 'pito.png', inputs, generated[novel], distances[novel])
-    # print(f"Saved {np.count_nonzero(novel)} distinct new emojis to pito.png")
+        plt.imshow(result, cmap='Greys_r')
+        plt.title("Mapa del codigo latente del autoencoder")
+        plt.show()
