@@ -145,10 +145,10 @@ def main():
         )
         model = Autoencoder(
             topology=[35, 16, 2],
-            eta=0.005,
+            eta=0.0025,
             train_inputs=inputs,
-            encoder_activation=ReLU(),
-            decoder_activation=ReLU(),
+            encoder_activation=Tanh(),
+            decoder_activation=Tanh(),
             rng=rng,
             epochs=50000,
             batch_size=32,
