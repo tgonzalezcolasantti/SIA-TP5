@@ -1,83 +1,93 @@
 import argparse
 from pathlib import Path
+from typing import List, Self, override
 
 import numpy as np
 
-from models.activation import Adaline, Tanh
-from models.neural_network import Perceptron
-from models.optimization import Adam
+from models.activation import Activation, Tanh
+from models.autoencoder import Autoencoder
+from models.optimization import Adam, Optimization
 
 
 def sigmoid(logits: np.ndarray) -> np.ndarray:
     return np.exp(-np.logaddexp(0.0, -logits))
 
 
-class VariationalAutoencoder:
+class VariationalAutoencoder(Autoencoder):
+
     def __init__(
-        self,
-        input_size: int,
-        hidden_size: int = 64,
-        latent_dim: int = 2,
-        learning_rate: float = 0.005,
-        seed: int = 42,
+        self: Self,
+        topology: List[int],
+        eta: float,
+        rng: np.random.Generator,
+        encoder_activation:Activation,
+        decoder_activation:Activation,
+        train_inputs: np.ndarray,
+        epochs: int = 1000,
+        batch_size: int = 1,
+        optimization: type[Optimization] = Adam
     ):
-        self.rng = np.random.default_rng(seed)
-        self.latent_dim = latent_dim
-        self.encoder = Perceptron(
-            [input_size, hidden_size, 2 * latent_dim],
-            Tanh(),
-            learning_rate,
-            optimization=Adam(),
-            output_activation=Adaline(),
-            rng=self.rng,
+        decoder_topology = topology.copy()
+        decoder_topology.reverse()
+        topology[-1] = topology[-1] * 2
+        super().__init__(
+            topology=topology,
+            decoder_topology=decoder_topology,
+            eta=eta,
+            rng=rng,
+            encoder_activation=encoder_activation,
+            decoder_activation=decoder_activation,
+            train_inputs=train_inputs,
+            epochs=epochs,
+            batch_size=batch_size,
+            optimization=optimization
         )
-        self.decoder = Perceptron(
-            [latent_dim, hidden_size, input_size],
-            Tanh(),
-            learning_rate,
-            optimization=Adam(),
-            output_activation=Adaline(),
-            rng=self.rng,
-        )
+        self.last_inputs: np.ndarray
+        self.latent_offset: np.ndarray
 
-    def encode(self, inputs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Return the mean and log-variance of each input's latent distribution."""
-        parameters = self.encoder.classify(inputs).copy()
-        mean, log_variance = np.split(parameters, 2, axis=1)
-        return mean, log_variance
+    def split_mean_variance(self: Self, inputs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        mean, var = np.split(inputs, 2, axis=1)
+        return mean, var
 
-    def decode(self, latent: np.ndarray) -> np.ndarray:
-        """Return the probability of a black pixel for each output position."""
-        return sigmoid(self.decoder.classify(latent))
+    @override
+    def _apply_intermediate_layer(self: Self, latent_code: np.ndarray) -> np.ndarray:
+        mean, var = self.split_mean_variance(latent_code)
+        self.last_inputs = latent_code
+        epsilon = self.rng.standard_normal(mean.shape)
+        self.latent_offset = np.exp(0.5 * var) * epsilon
+        return mean + self.latent_offset
 
-    def reconstruct(self, inputs: np.ndarray) -> np.ndarray:
-        mean, _ = self.encode(inputs)
-        return self.decode(mean)
-
-    def train_step(self, inputs: np.ndarray) -> tuple[float, float]:
-        """Update both networks and return mean reconstruction loss and mean KL."""
-        inputs = np.atleast_2d(np.asarray(inputs, dtype=float))
-        if not inputs.size or not np.all((0 <= inputs) & (inputs <= 1)):
-            raise ValueError("Expected a nonempty batch with pixels in [0, 1]")
-
-        mean, log_variance = self.encode(inputs)
-        noise = self.rng.standard_normal(mean.shape)
-        latent_offset = np.exp(0.5 * log_variance) * noise
-        logits = self.decoder.classify(mean + latent_offset)
-
-        # Sum across pixels and latent dimensions, then average across images.
-        reconstruction = np.sum(np.logaddexp(0, logits) - inputs * logits, axis=1)
-        variance_minus_one = np.expm1(log_variance)
-        kl = 0.5 * np.sum(mean**2 + variance_minus_one - log_variance, axis=1)
-
-        # Perceptron averages its parameter updates over the batch.
-        latent_gradient = self.decoder.update_weights((sigmoid(logits) - inputs).T).T
+    @override
+    def _apply_intermediate_derivative(self: Self, latent_gradient: np.ndarray) -> np.ndarray:
+        mean, var = self.split_mean_variance(self.last_inputs)
         mean_gradient = latent_gradient + mean
-        log_variance_gradient = 0.5 * (latent_gradient * latent_offset + variance_minus_one)
-        parameter_gradients = np.concatenate((mean_gradient, log_variance_gradient), axis=1)
-        self.encoder.update_weights(parameter_gradients.T)
-        return float(reconstruction.mean()), float(kl.mean())
+        variance_minus_one = np.expm1(var)
+        log_variance_gradient = 0.5 * (latent_gradient * self.latent_offset + variance_minus_one)
+        return np.concatenate((mean_gradient, log_variance_gradient), axis=1)
 
+    @override
+    def _print_stats(self: Self, epoch: int):
+        # Sum across pixels and latent dimensions, then average across images.
+        latent_code = self.encoder.classify(self.inputs)
+        mean, var = self.split_mean_variance(latent_code)
+        logits = self.decoder.classify(mean)
+        reconstruction = np.sum(np.logaddexp(0, logits) - self.inputs * logits, axis=1)
+        variance_minus_one = np.expm1(var)
+        kl = 0.5 * np.sum(mean**2 + variance_minus_one - var, axis=1)
+        reconstruction, kl = float(reconstruction.mean()), float(kl.mean())
+        print(
+            f"Epoch {epoch:4d} | BCE {reconstruction:7.3f} | KL {kl:6.3f}"
+            f" | Total {reconstruction + kl:7.3f}"
+        )
+
+    def reconstruct(self, input_value: np.ndarray) -> np.ndarray:
+        mean, _ = self.split_mean_variance(
+            self.encode(
+                input_value
+            )
+        )
+        print(mean.shape)
+        return self.decode(mean)
 
 def save_emoji_grid(
     output: Path,
@@ -90,7 +100,7 @@ def save_emoji_grid(
 
     figure = Figure(figsize=(10, 6), layout="constrained")
     FigureCanvasAgg(figure)
-    training_panel, generated_panel = figure.subfigures(1, 2)
+    training_panel, generated_panel = figure.subfigures(1, 2) # type: ignore
     training_panel.suptitle("Emojis de entrenamiento")
     generated_panel.suptitle("Emojis generados\nPíxeles distintos respecto del más cercano")
 
@@ -132,23 +142,26 @@ def main() -> None:
     if args.generate and args.generate.suffix.lower() != ".png":
         parser.error("--generate requires a .png output path")
 
+    rng = np.random.default_rng(args.seed)
     inputs = load_emojis()
-    model = VariationalAutoencoder(input_size=inputs.shape[1], seed=args.seed)
-    print(f"Training with {len(inputs)} emojis and {model.latent_dim} latent dimensions")
-    for epoch in range(1, args.epochs + 1):
-        reconstruction, kl = model.train_step(inputs)
-        if epoch == 1 or epoch % 100 == 0 or epoch == args.epochs:
-            print(
-                f"Epoch {epoch:4d} | BCE {reconstruction:7.3f} | KL {kl:6.3f}"
-                f" | Total {reconstruction + kl:7.3f}"
-            )
+    model = VariationalAutoencoder(
+        topology=[inputs.shape[1], 64, 2],
+        eta=0.005,
+        encoder_activation=Tanh(),
+        decoder_activation=Tanh(),
+        rng=rng,
+        train_inputs=inputs,
+        epochs=args.epochs,
+        batch_size=len(inputs),
+        optimization=Adam
+    )
 
     reconstructed = model.reconstruct(inputs) >= 0.5
     wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
     print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
 
     if args.generate:
-        latent = model.rng.standard_normal((16, model.latent_dim))
+        latent = model.rng.standard_normal((16, 2))
         generated = model.decode(latent) >= 0.5
         _, first_indices = np.unique(generated, axis=0, return_index=True)
         generated = generated[np.sort(first_indices)]
