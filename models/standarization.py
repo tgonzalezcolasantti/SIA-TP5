@@ -34,11 +34,11 @@ class ZScoreStandardize:
         self._scales[self._scales == 0] = 1.0
         self._standard_values = self.standarize(self._values) # type: ignore
 
-    def standarize(self: Self, values: np.ndarray | Number) -> np.ndarray | Number:
+    def standarize(self: Self, values: np.ndarray) -> np.ndarray:
         "Scales values in dataset so that they have means=0 and deviations=1"
         return (values - self._means) / self._scales
 
-    def unstandardize(self: Self, values: np.ndarray | Number) -> np.ndarray | Number:
+    def unstandardize(self: Self, values: np.ndarray) -> np.ndarray:
         "Returns a standardized value back to its original distribution"
         return (values * self._scales) + self._means
 
