@@ -23,9 +23,9 @@ topologies = [
 ]
 etas = [0.01, 0.005, 0.001]
 optimizations = [Adam, NoOptimization]
-activations = [Tanh(), ReLU(), Logistic()]
+activations = [Tanh(), Logistic()]
 epochs_list = [2000, 10000, 50000]
-seeds = [42]
+seeds = [42, 43]
 
 class AutoencoderConfig(TypedDict):
     topology: List[int]
@@ -37,22 +37,26 @@ class AutoencoderConfig(TypedDict):
     metric: Optional[float]
 
 def run_task(data: np.ndarray, config: AutoencoderConfig, task: TaskID, progress: Progress) -> Tuple[Autoencoder, AutoencoderConfig]:
-    model = Autoencoder(
-        train_inputs=data,
-        topology=config['topology'],
-        eta=config['eta'],
-        encoder_activation=config['activation'],
-        decoder_activation=config['activation'],
-        epochs=config['epochs'],
-        batch_size=(len(data)),
-        optimization=config['optimization'],
-        rng=np.random.default_rng(config['seed']),
-        task=task,
-        progress=progress
-    )
-    reconstructed = model.reconstruct(data) >= 0.5
-    config['metric'] = np.mean(np.count_nonzero(reconstructed != data, axis=1))
-    return model, config
+    try:
+        model = Autoencoder(
+            train_inputs=data,
+            topology=config['topology'],
+            eta=config['eta'],
+            encoder_activation=config['activation'],
+            decoder_activation=config['activation'],
+            epochs=config['epochs'],
+            batch_size=(len(data)),
+            optimization=config['optimization'],
+            rng=np.random.default_rng(config['seed']),
+            task=task,
+            progress=progress
+        )
+        reconstructed = model.reconstruct(data) >= 0.5
+        config['metric'] = np.sum(np.count_nonzero(reconstructed != data, axis=1))
+        return model, config
+    except RuntimeError as e:
+        print(f"ERROR ON {config}: {e}")
+        raise e
 
 def run_study(max_tasks: Optional[int] = None):
     inputs, labels = dumb_parse_c_array(Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
@@ -106,17 +110,18 @@ def run_study(max_tasks: Optional[int] = None):
             for job in list(jobs):
                 if job.ready():
                     jobs.remove(job)
-                    row: Tuple[Autoencoder, AutoencoderConfig] = job.get()
-                    if row is None:
-                        raise ValueError("OOPS")
-                    globalprogress.advance(full_progress)
-                    row[1]['optimization'] = row[1]['optimization']() # type: ignore
-                    for key in row[1].keys():
-                        row[1][key] = str(row[1][key])
-                    rows.append(row[1])
+                    if job.successful():
+                        row: Tuple[Autoencoder, AutoencoderConfig] = job.get()
+                        if row is None:
+                            raise ValueError("OOPS")
+                        globalprogress.advance(full_progress)
+                        row[1]['optimization'] = row[1]['optimization']() # type: ignore
+                        for key in row[1].keys():
+                            row[1][key] = str(row[1][key])
+                        rows.append(row[1])
                     # print(f"Configuración {row['config_id']}/{len(settings)} terminada", flush=True)
         trials = pd.DataFrame(rows)
-        trials.to_csv(Path(__file__).parent.resolve() / '..' / "autoencoder_sweep.csv", index=False)
+        trials.to_csv(Path(__file__).parent.resolve() / '..' / "results" / "autoencoder_sweep.csv", index=False)
 
 if __name__ == '__main__':
     run_study()

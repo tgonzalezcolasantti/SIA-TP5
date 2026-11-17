@@ -1,17 +1,15 @@
 import pathlib
-import time
-from typing import List, Optional, Self
+from typing import List, Optional, Self, Dict, override
 import numpy as np
 from rich.live import Live
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TaskID, TaskProgressColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
+from matplotlib import pyplot as plt
 
 from data.parser import dumb_parse_c_array
-from models.activation import Activation, Adaline, Tanh
+from models.activation import Activation, Adaline, ReLU, Tanh
 from models.neural_network import Perceptron
 from models.optimization import Adam, Optimization
-
-from matplotlib import pyplot as plt
 
 def sigmoid(logits: np.ndarray) -> np.ndarray:
     return np.exp(-np.logaddexp(0.0, -logits))
@@ -108,7 +106,22 @@ class Autoencoder:
                     self._print_stats(self.epoch)
                 # self.save()
 
-if __name__ == '__main__':
+class MonitoringAutoencoder(Autoencoder):
+    def __init__(self: Self, *args, **kwargs):
+        self.stats: Dict[int, float] = {}
+        super().__init__(*args, **kwargs)
+
+    @override
+    def _print_stats(self: Self, epoch: int):
+        reconstructed = self.reconstruct(self.inputs) >= 0.5
+        wrong_pixels = np.count_nonzero(reconstructed != self.inputs, axis=1)
+        self.stats[epoch] = np.sum(wrong_pixels)
+        super()._print_stats(epoch)
+
+    def get_stats(self: Self) -> Dict[int, float]:
+        return self.stats
+
+def main():
     inputs, labels = dumb_parse_c_array(pathlib.Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
     rng = np.random.default_rng(42)
     taskprogress = Progress(
@@ -132,10 +145,10 @@ if __name__ == '__main__':
         )
         model = Autoencoder(
             topology=[35, 16, 2],
-            eta=0.0025,
+            eta=0.005,
             train_inputs=inputs,
-            encoder_activation=Tanh(),
-            decoder_activation=Tanh(),
+            encoder_activation=ReLU(),
+            decoder_activation=ReLU(),
             rng=rng,
             epochs=50000,
             batch_size=32,
@@ -144,12 +157,13 @@ if __name__ == '__main__':
             progress=taskprogress
         )
         reconstructed = model.reconstruct(inputs) >= 0.5
-        print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{reconstructed[1].reshape((7,5))}")
-        print("\n\n")
+        wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
+
+        print(f"Pixeles erroneos por imagen {np.mean(wrong_pixels)}\nPixeles erroneos totales {np.sum(wrong_pixels)}")
 
         # Scatterplot de codigo latente
         encoded = model.encode(inputs)
-        print(encoded)
+        # print(encoded)
         figure, ax = plt.subplots()
         ax.scatter(encoded[:,0], encoded[:,1])
         for i, value in enumerate(encoded):
@@ -171,9 +185,9 @@ if __name__ == '__main__':
                 county.append(y)
                 latent_codes.append([x, y])
         latent_codes = np.array(latent_codes)
-        print(latent_codes)
-        print(countx)
-        print(county)
+        # print(latent_codes)
+        # print(countx)
+        # print(county)
         generated = (model.decode(latent_codes) >= 0.5).astype(float)
         result = np.zeros((8*len(county), 6*len(countx)))
 
@@ -187,3 +201,6 @@ if __name__ == '__main__':
         plt.imshow(result, cmap='Greys_r')
         plt.title("Mapa del codigo latente del autoencoder")
         plt.show()
+
+if __name__ == '__main__':
+    main()

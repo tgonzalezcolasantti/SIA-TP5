@@ -9,7 +9,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TaskProgressC
 from rich.table import Table
 
 from data.parser import dumb_parse_c_array
-from models.activation import Tanh
+from models.activation import ReLU, Tanh
 from models.autoencoder import Autoencoder
 from models.noise import GaussianNoise, Noise, SaltAndPepperNoise
 
@@ -94,11 +94,11 @@ if __name__ == '__main__':
             is_task=True,
         )
         model = DenoisingAutoencoder(
-            topology=[35, 16, 8, 2],
+            topology=[35, 16, 2],
             eta=0.005,
             train_inputs=inputs,
-            encoder_activation=Tanh(),
-            decoder_activation=Tanh(),
+            encoder_activation=ReLU(),
+            decoder_activation=ReLU(),
             epochs=75000,
             batch_size=32,
             rng=rng,
@@ -121,11 +121,11 @@ if __name__ == '__main__':
             is_task=True,
         )
         model = DenoisingAutoencoder(
-            topology=[35, 16, 8, 2],
+            topology=[35, 16, 2],
             eta=0.005,
             train_inputs=inputs,
-            encoder_activation=Tanh(),
-            decoder_activation=Tanh(),
+            encoder_activation=ReLU(),
+            decoder_activation=ReLU(),
             epochs=50000,
             batch_size=32,
             rng=rng,
