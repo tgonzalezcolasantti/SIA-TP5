@@ -60,7 +60,7 @@ def plot_results(results_dir):
     ax_1.set_ylabel('Suma de pixeles incorrectos entre salidas predecidas y esperadas')
     ax_1.set_title("Evolucion del error durante entrenamiento, eta=0.001")
     fig.tight_layout()
-    fig.savefig(results_dir / "progress.png", dpi=150, bbox_inches="tight")
+    fig.savefig(plots / "progress.png", dpi=150, bbox_inches="tight")
 
 colors = ["lightcoral", "red", "sandybrown", "darkgoldenrod", "yellowgreen", "lightgreen", "chartreuse", "deepskyblue", "royalblue", "mediumblue", "slateblue", "mediumpurple", "hotpink", "lightpink"]
 
