@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import numpy as np
 
@@ -78,6 +79,41 @@ class VariationalAutoencoder:
         return float(reconstruction.mean()), float(kl.mean())
 
 
+def save_emoji_grid(
+    output: Path,
+    inputs: np.ndarray,
+    samples: np.ndarray,
+    distances: np.ndarray,
+) -> None:
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(10, 6), layout="constrained")
+    FigureCanvasAgg(figure)
+    training_panel, generated_panel = figure.subfigures(1, 2)
+    training_panel.suptitle("Emojis de entrenamiento")
+    generated_panel.suptitle("Emojis generados\nPíxeles distintos respecto del más cercano")
+
+    for panel, images in ((training_panel, inputs), (generated_panel, samples)):
+        axes = panel.subplots(4, 4).flat
+        for index, ax in enumerate(axes):
+            ax.set_axis_off()
+            if index >= len(images):
+                continue
+            ax.imshow(
+                images[index].reshape(16, 16),
+                cmap="gray_r",
+                vmin=0,
+                vmax=1,
+                interpolation="nearest",
+            )
+            if panel is generated_panel:
+                ax.set_title(f"{index + 1} · {distances[index]} px", fontsize=10)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output, dpi=150)
+
+
 def main() -> None:
     from data.emoji_loader import load_emojis
 
@@ -86,9 +122,15 @@ def main() -> None:
     )
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--generate", type=Path, metavar="OUTPUT.png",
+        help="Save a PNG grid of training examples and novel generated emojis",
+    )
     args = parser.parse_args()
     if args.epochs < 1:
         parser.error("--epochs must be positive")
+    if args.generate and args.generate.suffix.lower() != ".png":
+        parser.error("--generate requires a .png output path")
 
     inputs = load_emojis()
     model = VariationalAutoencoder(input_size=inputs.shape[1], seed=args.seed)
@@ -104,6 +146,19 @@ def main() -> None:
     reconstructed = model.reconstruct(inputs) >= 0.5
     wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
     print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
+
+    if args.generate:
+        latent = model.rng.standard_normal((16, model.latent_dim))
+        generated = model.decode(latent) >= 0.5
+        _, first_indices = np.unique(generated, axis=0, return_index=True)
+        generated = generated[np.sort(first_indices)]
+        differences = np.count_nonzero(generated[:, None, :] != inputs[None, :, :], axis=2)
+        distances = differences.min(axis=1)
+        novel = distances > 0
+        if not np.any(novel):
+            raise SystemExit("No novel emojis were generated. Try another seed.")
+        save_emoji_grid(args.generate, inputs, generated[novel], distances[novel])
+        print(f"Saved {np.count_nonzero(novel)} distinct new emojis to {args.generate}")
 
 
 if __name__ == "__main__":

@@ -129,3 +129,19 @@ medias y dos logvarianzas. Durante el entrenamiento, el decodificador
 La pérdida suma la entropía cruzada binaria de reconstrucción y la divergencia KL
 respecto de una normal estándar. El comando registra ambos términos y mide los
 píxeles incorrectos al reconstruir los emojis de entrenamiento desde sus medias latentes.
+
+## Generación de emojis (punto 2.c)
+
+```powershell
+uv run --locked python -m models.variational_autoencoder --epochs 1000 --seed 42 --generate results/vae/emoji_samples.png
+```
+
+Después de entrenar, el comando toma 16 vectores de una normal estándar y los
+pasa directamente al decodificador. Aplica un umbral de `0.5` a cada píxel,
+descarta las muestras repetidas y las que coinciden con un emoji de entrenamiento,
+y guarda las restantes junto a los originales. Cada muestra indica cuántos
+píxeles la separan del emoji de entrenamiento más parecido.
+
+Con la semilla 42, la muestra 2 combina ojos en forma de corazón con una boca
+recta. El contorno redondo y la disposición de los rasgos conservan el estilo
+del conjunto. La imagen difiere en 4 píxeles del ejemplo más cercano.
