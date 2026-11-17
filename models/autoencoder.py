@@ -1,14 +1,14 @@
 import pathlib
-from typing import Any, Dict, List, Self, Tuple, override
+import time
+from typing import List, Self, override
 import numpy as np
 
-from data.emoji_loader import load_emojis
 from data.parser import dumb_parse_c_array
-from models.activation import Activation, Adaline, ReLU, Step, Tanh
+from models.activation import Activation, Adaline, Tanh
 from models.neural_network import Perceptron
-from models.noise import GaussianNoise, Noise, SaltAndPepperNoise
-from models.optimization import Adam, NoOptimization, Optimization
-from models.standarization import ZScoreStandardize
+from models.optimization import Adam, Optimization
+
+from matplotlib import pyplot as plt
 
 def sigmoid(logits: np.ndarray) -> np.ndarray:
     return np.exp(-np.logaddexp(0.0, -logits))
@@ -19,20 +19,20 @@ class Autoencoder:
             topology: List[int],
             eta: float,
             train_inputs: np.ndarray,
-            rng: np.random.Generator, 
+            rng: np.random.Generator,
             encoder_activation:Activation = Tanh(),
             decoder_activation:Activation = Tanh(),
             epochs: int = 1000,
             batch_size: int = 1,
-            optimization: Optimization = Adam(),
+            optimization: type[Optimization] = Adam,
             decoder_topology: List[int] | None = None,
     ):
         if not decoder_topology:
             decoder_topology = topology.copy()
             decoder_topology.reverse()
         self.rng = rng
-        self.encoder = Perceptron(topology, encoder_activation, eta, optimization=optimization, rng=self.rng, output_activation=Adaline())
-        self.decoder = Perceptron(decoder_topology, decoder_activation, eta, optimization=optimization, rng=self.rng, output_activation=Adaline())
+        self.encoder = Perceptron(topology, encoder_activation, eta, optimization=optimization(), rng=self.rng, output_activation=Adaline())
+        self.decoder = Perceptron(decoder_topology, decoder_activation, eta, optimization=optimization(), rng=self.rng, output_activation=Adaline())
         self.epochs = epochs
         self.epoch = 0
         self.inputs = train_inputs
@@ -99,13 +99,13 @@ class VariationalAutoencoder(Autoencoder):
         self: Self,
         topology: List[int],
         eta: float,
-        rng: np.random.Generator, 
+        rng: np.random.Generator,
         encoder_activation:Activation,
         decoder_activation:Activation,
         train_inputs: np.ndarray,
         epochs: int = 1000,
         batch_size: int = 1,
-        optimization: Optimization = NoOptimization()
+        optimization: type[Optimization] = Adam
     ):
         decoder_topology = topology.copy()
         decoder_topology.reverse()
@@ -169,75 +169,64 @@ class VariationalAutoencoder(Autoencoder):
         print(mean.shape)
         return self.decode(mean)
 
-class DenoisingAutoencoder(Autoencoder):
-    def __init__(self: Self, *args, noise_generator: Noise, noise_level: float = 0.1, **kwargs):
-        self.noise_level = noise_level
-        self.noise = noise_generator
-        super().__init__(*args, **kwargs)
-
-    def transform_input_data(self: Self, input_data: np.ndarray, noise_level: float) -> np.ndarray:
-        return self.noise(input_data, noise_level)
-
-    @override
-    def _transform_input_data(self: Self, input_data: np.ndarray) -> np.ndarray:
-        # Gaussian noise bc it's easy
-        return self.transform_input_data(input_data, self.noise_level/2)
-
-    def evaluate_noise_performance(self: Self, input_data: np.ndarray, target_noise_levels: List[float]) -> Dict[float, Tuple[float, float]]:
-        ans = {}
-        for noise_level in target_noise_levels:
-            noisy_inputs = self.transform_input_data(input_data=input_data, noise_level=noise_level) if noise_level > 0 else input_data
-            reconstructed = self.reconstruct(noisy_inputs) >= 0.5
-            wrong_pixels = np.count_nonzero(reconstructed != input_data, axis=1)
-            ans[noise_level] = (wrong_pixels.mean(), wrong_pixels.std())
-        return ans
-
 if __name__ == '__main__':
-    inputs = dumb_parse_c_array(pathlib.Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
+    inputs, labels = dumb_parse_c_array(pathlib.Path(__file__).parent.resolve() / '..' / 'data' / 'font.h')
     rng = np.random.default_rng(42)
-    # model = Autoencoder(topology=[35, 16, 2], eta=0.0025, train_inputs=inputs, encoder_activation=Tanh(), decoder_activation=Tanh(), rng=rng, epochs=50000, batch_size=32)
-
-    model = DenoisingAutoencoder(
+    model = Autoencoder(
         topology=[35, 16, 2],
-        eta=0.005,
+        eta=0.0025,
         train_inputs=inputs,
         encoder_activation=Tanh(),
         decoder_activation=Tanh(),
+        rng=rng,
         epochs=50000,
         batch_size=32,
-        rng=rng,
-        noise_level=0.1,
-        noise_generator=SaltAndPepperNoise(rng, noise_ratio=0.5)
+        optimization=Adam
     )
+    reconstructed = model.reconstruct(inputs) >= 0.5
+    print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{reconstructed[1].reshape((7,5))}")
+    print("\n\n")
 
-    noise_performance = model.evaluate_noise_performance(inputs, [0, 0.05, 0.1, 0.25, 0.5, 1])
-    print("SALT AND PEPPER")
-    for noise, metrics in noise_performance.items():
-        print(f"Wrong pixels per image for noise level {noise}:\t{metrics[0]:5.2f} +- {metrics[1]:5.2f}")
+    # Scatterplot de codigo latente
+    encoded = model.encode(inputs)
+    print(encoded)
+    figure, ax = plt.subplots()
+    ax.scatter(encoded[:,0], encoded[:,1])
+    for i, value in enumerate(encoded):
+        ax.annotate(labels[i], (value[0], value[1]), fontsize=12)
+    ax.set_xlabel("1er componente codigo latente")
+    ax.set_ylabel("2da componente codigo latente")
+    ax.set_title("Distribucion de caracteres segun componentes de codigo latente")
+    plt.show()
 
-    model = DenoisingAutoencoder(
-        topology=[35, 16, 2],
-        eta=0.005,
-        train_inputs=inputs,
-        encoder_activation=Tanh(),
-        decoder_activation=Tanh(),
-        epochs=50000,
-        batch_size=32,
-        rng=rng,
-        noise_level=0.1,
-        noise_generator=GaussianNoise(rng)
-    )
+    # Generacion de nuevas letras (?)
 
-    print("GAUSS")
-    noise_performance = model.evaluate_noise_performance(inputs, [0, 0.05, 0.1, 0.25, 0.5, 1])
-    for noise, metrics in noise_performance.items():
-        print(f"Wrong pixels per image for noise level {noise}:\t{metrics[0]:5.2f} +- {metrics[1]:5.2f}")
-    # reconstructed = model.reconstruct(inputs) >= 0.5
-    # print(f"Input {inputs[1].reshape((7,5))} \nproduced\n{reconstructed[1].reshape((7,5))}")
-    # print("\n\n")
-    # for i in range(0, 120, 10):
-    #     for j in range(0, 127, 10):
-    #         print(f"Output for ({i},{j}): {model.decode(np.asarray([i, j])).round(0)}")
+    latent_codes = []
+    countx = []
+    county = []
+    for x in range(-25, 26, 1):
+        countx.append(x)
+        county = []
+        for y in range(-10, 30, 1):
+            county.append(y)
+            latent_codes.append([x, y])
+    latent_codes = np.array(latent_codes)
+    print(latent_codes)
+    print(countx)
+    print(county)
+    generated = (model.decode(latent_codes) >= 0.5).astype(float)
+    result = np.zeros((8*len(county), 6*len(countx)))
+
+    for image, latent_code in zip(generated, latent_codes):
+        index_x = countx.index(latent_code[0])
+        index_y = county.index(latent_code[1])
+        result[index_y*8:(index_y + 1) * 8 - 1, index_x*6:(index_x+1)*6 - 1] = image.reshape(7,5)
+
+    plt.figure(figsize=(10, 10))
+
+    plt.imshow(result, cmap='Greys_r')
+    plt.title("Mapa del codigo latente del autoencoder")
+    plt.show()
 
     # inputs = load_emojis()
     # model = VariationalAutoencoder(
@@ -246,10 +235,22 @@ if __name__ == '__main__':
     #     encoder_activation=Tanh(),
     #     decoder_activation=Tanh(),
     #     topology=[16*16, 64, 2],
-    #     batch_size=8,
-    #     seed=42,
-    #     epochs=50000
+    #     batch_size=len(inputs),
+    #     rng=rng,
+    #     epochs=2000,
+    #     optimization=Adam
     # )
     # reconstructed = model.reconstruct(inputs) >= 0.5
     # wrong_pixels = np.count_nonzero(reconstructed != inputs, axis=1)
     # print(f"Reconstruction from the posterior mean: {wrong_pixels.mean():.2f} wrong pixels/image")
+    # latent = model.rng.standard_normal((16, 2))
+    # generated = model.decode(latent) >= 0.5
+    # _, first_indices = np.unique(generated, axis=0, return_index=True)
+    # generated = generated[np.sort(first_indices)]
+    # differences = np.count_nonzero(generated[:, None, :] != inputs[None, :, :], axis=2)
+    # distances = differences.min(axis=1)
+    # novel = distances > 0
+    # if not np.any(novel):
+    #     raise SystemExit("No novel emojis were generated. Try another seed.")
+    # save_emoji_grid(pathlib.Path(__file__).parent.resolve() / 'pito.png', inputs, generated[novel], distances[novel])
+    # print(f"Saved {np.count_nonzero(novel)} distinct new emojis to pito.png")

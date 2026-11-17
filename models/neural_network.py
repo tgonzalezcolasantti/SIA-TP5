@@ -1,6 +1,5 @@
 from pathlib import Path
 import pickle
-import sys
 from typing import List, Optional, Self, Tuple, override
 
 import numpy as np
@@ -90,7 +89,7 @@ class Perceptron:
         if inputs.ndim == 1:
             inputs = inputs[None, :]
         if inputs.ndim != 2 or inputs.shape[1] != self.topology[0]:
-            raise ValueError("input size does not match the first layer")
+            raise ValueError(f"input size does not match the first layer (expected {self.topology[0]}, got {inputs.shape[1]})")
         return self._calculate_outputs(inputs).T
 
     def _calculate_outputs(self: Self, inputs: np.ndarray) -> np.ndarray:
